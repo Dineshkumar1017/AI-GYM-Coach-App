@@ -17,21 +17,10 @@ from services.config.workout_config import POSE_CONNECTIONS
 
 class VideoProcessorClass(VideoProcessorBase):
     def __init__(self):
-
-        try:
-            options = vision.PoseLandmarkerOptions(...)
-            self._landmarker = vision.PoseLandmarker.create_from_options(options)
-        except OSError as e:
-            import streamlit as st
-            st.error(
-                "⚠️ MediaPipe failed to load native libraries. "
-                "Please check that your packages.txt includes libgomp1 and libstdc++6."
-            )
-            self._landmarker = None
-
         self._lock = threading.Lock()
         self._latest_metrics = None
         self._exercise_type = "Squats"
+        self._frame_timestamps_ms = 0
 
         model_path = os.path.join(os.getcwd(), "ml_models", "pose_landmarker_full.task")
         base_option = python.BaseOptions(model_asset_path=model_path)
@@ -45,7 +34,14 @@ class VideoProcessorClass(VideoProcessorBase):
             output_segmentation_masks=False
         )
 
-        self._landmarker = vision.PoseLandmarker.create_from_options(options)
+        try:
+            self._landmarker = vision.PoseLandmarker.create_from_options(options)
+        except Exception as e:
+            self._landmarker = None
+            raise RuntimeError(
+                f"MediaPipe PoseLandmarker failed to initialize: {e}\n"
+                "Ensure packages.txt includes: libgomp1, libstdc++6, libgcc-s1, libxrender1"
+            ) from e
 
         self._detectors = {
             "Squats": SquatDetector(),
@@ -55,8 +51,6 @@ class VideoProcessorClass(VideoProcessorBase):
             "Lunges": LungesDetector(),
         }
 
-        self._frame_timestamps_ms = 0
-    
     def set_latest_metrics(self, metrics):
         with self._lock:
             self._latest_metrics = metrics.copy()
@@ -64,7 +58,7 @@ class VideoProcessorClass(VideoProcessorBase):
     def get_latest_metrics(self):
         with self._lock:
             return None if self._latest_metrics is None else self._latest_metrics.copy()
-        
+
     def set_exercise(self, exercise_type):
         with self._lock:
             self._exercise_type = exercise_type
@@ -72,7 +66,7 @@ class VideoProcessorClass(VideoProcessorBase):
     def get_exercise(self):
         with self._lock:
             return self._exercise_type
-        
+
     def _draw_skeleton(self, img, landmarks):
         h, w = img.shape[:2]
 
@@ -88,17 +82,17 @@ class VideoProcessorClass(VideoProcessorBase):
                     (0, 255, 0),
                     8
                 )
-        
+
         for lm in landmarks:
             if lm.visibility > 0.7:
                 cv2.circle(
-                    img, 
+                    img,
                     (int(lm.x * w), int(lm.y * h)),
                     8,
                     (255, 0, 0),
                     -1
                 )
-            
+
     def _draw_no_pose_warnings(self, img):
         cv2.putText(
             img,
@@ -134,10 +128,8 @@ class VideoProcessorClass(VideoProcessorBase):
         elif ex_type == "Lunges":
             self._draw_lunge_overlays(img, metrics)
 
-
     def _draw_squats_overlays(self, img, metrics):
         h, _ = img.shape[:2]
-
         cv2.putText(
             img,
             f"DEPTH: {metrics['depth_status']}",
@@ -147,10 +139,9 @@ class VideoProcessorClass(VideoProcessorBase):
             (0, 255, 0),
             2,
         )
-    
+
     def _draw_pushup_overlays(self, img, metrics):
         h, _ = img.shape[:2]
-
         cv2.putText(
             img,
             f"BODY: {metrics['body_alignment']} | HIP: {metrics['hip_status']}",
@@ -163,7 +154,6 @@ class VideoProcessorClass(VideoProcessorBase):
 
     def _draw_curl_overlays(self, img, metrics):
         h, _ = img.shape[:2]
-
         cv2.putText(
             img,
             f"SWING: {metrics['swing_status']}",
@@ -176,7 +166,6 @@ class VideoProcessorClass(VideoProcessorBase):
 
     def _draw_press_overlays(self, img, metrics):
         h, _ = img.shape[:2]
-
         cv2.putText(
             img,
             f"EXT: {metrics['extension_status']} | BACK: {metrics['back_arch_status']}",
@@ -189,7 +178,6 @@ class VideoProcessorClass(VideoProcessorBase):
 
     def _draw_lunge_overlays(self, img, metrics):
         h, _ = img.shape[:2]
-
         cv2.putText(
             img,
             f"BALANCE: {metrics['balance_status']}",
@@ -220,20 +208,16 @@ class VideoProcessorClass(VideoProcessorBase):
             self._draw_skeleton(image, landmarks)
 
             ex_type = self.get_exercise()
-
             detector = self._detectors.get(ex_type)
 
             if detector:
                 metrics = detector.process(landmarks)
-
                 metrics["pose_detected"] = True
-
                 self._draw_overlays(image, metrics, ex_type)
-
                 self.set_latest_metrics(metrics)
         else:
             self._draw_no_pose_warnings(image)
-            
+
             with self._lock:
                 if self._latest_metrics is not None:
                     self._latest_metrics["pose_detected"] = False
@@ -241,4 +225,3 @@ class VideoProcessorClass(VideoProcessorBase):
                     self._latest_metrics = {"pose_detected": False}
 
         return av.VideoFrame.from_ndarray(image, format="bgr24")
-    
