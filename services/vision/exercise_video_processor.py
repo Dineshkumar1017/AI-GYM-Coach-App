@@ -17,6 +17,18 @@ from services.config.workout_config import POSE_CONNECTIONS
 
 class VideoProcessorClass(VideoProcessorBase):
     def __init__(self):
+
+        try:
+            options = vision.PoseLandmarkerOptions(...)
+            self._landmarker = vision.PoseLandmarker.create_from_options(options)
+        except OSError as e:
+            import streamlit as st
+            st.error(
+                "⚠️ MediaPipe failed to load native libraries. "
+                "Please check that your packages.txt includes libgomp1 and libstdc++6."
+            )
+            self._landmarker = None
+
         self._lock = threading.Lock()
         self._latest_metrics = None
         self._exercise_type = "Squats"

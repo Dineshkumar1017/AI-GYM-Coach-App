@@ -25,6 +25,8 @@ def main():
         initial_sidebar_state="expanded",
         layout="centered"
     )
+    
+    load_dotenv()
 
     load_css(os.path.join(os.getcwd(), "static", "style.css"))
     inject_local_font(os.path.join(os.getcwd(), "static", "AdobeClean.otf"), "AdobeClean")
@@ -36,7 +38,6 @@ def main():
 
     initial_session_defaults()
 
-    load_dotenv()
 
     if "voice_pipeline" not in st.session_state:
         try:
