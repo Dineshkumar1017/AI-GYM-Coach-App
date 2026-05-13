@@ -128,6 +128,19 @@ def get_rtc_configuration():
     return {"iceServers": ice_servers}
 
 
+def get_server_rtc_configuration():
+    return {"iceServers": DEFAULT_ICE_SERVERS}
+
+
+def get_frontend_rtc_configuration():
+    rtc_configuration = get_rtc_configuration()
+
+    if has_turn_server(rtc_configuration):
+        rtc_configuration["iceTransportPolicy"] = "relay"
+
+    return rtc_configuration
+
+
 def has_turn_server(rtc_configuration):
     ice_servers = rtc_configuration.get("iceServers", [])
 
@@ -392,9 +405,10 @@ def main():
             unsafe_allow_html=True,
         )
     else:
-        rtc_configuration = get_rtc_configuration()
+        frontend_rtc_configuration = get_frontend_rtc_configuration()
+        server_rtc_configuration = get_server_rtc_configuration()
 
-        if not has_turn_server(rtc_configuration):
+        if not has_turn_server(frontend_rtc_configuration):
             st.warning(
                 "A reliable TURN server is not configured. Add Twilio credentials "
                 "to Streamlit Secrets for stable camera streaming on Streamlit Cloud."
@@ -404,7 +418,8 @@ def main():
             key="exercise-analysis",
             mode=WebRtcMode.SENDRECV,
             video_processor_factory=VideoProcessorClass,
-            rtc_configuration=rtc_configuration,
+            frontend_rtc_configuration=frontend_rtc_configuration,
+            server_rtc_configuration=server_rtc_configuration,
             media_stream_constraints={
                 "video": True,
                 "audio": False
