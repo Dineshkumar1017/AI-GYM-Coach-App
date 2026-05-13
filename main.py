@@ -214,7 +214,7 @@ def main():
                     {"urls": ["stun:stun4.l.google.com:19302"]},
                     {"urls": ["stun:openrelay.metered.ca:80"]},
                 ]
-            }
+            },
             media_stream_constraints={
                 "video": True,
                 "audio": False
