@@ -138,6 +138,72 @@ def has_turn_server(rtc_configuration):
 
     return False
 
+
+@st.fragment(run_every=1)
+def render_live_sidebar_metrics():
+    context = st.session_state.get("webrtc_context")
+    sync_metrics_update(context)
+
+    if not st.session_state.get("workout_started", False):
+        return
+
+    exercise = st.session_state.get("exercise_type")
+    total_reps = st.session_state.get("reps")
+    current_set_reps = st.session_state.get("current_set_reps")
+    reps_per_set = st.session_state.get("reps_per_set")
+    sets_completed = st.session_state.get("sets_completed")
+    target_sets = st.session_state.get("target_sets")
+
+    st.divider()
+    st.subheader("Progress")
+    st.metric("Total Reps", f"{total_reps}")
+    st.metric("Current Set Reps", f"{current_set_reps} / {reps_per_set}")
+    st.metric("Sets Completed", f"{sets_completed} / {target_sets}")
+    st.divider()
+
+    if exercise == "Squats":
+        st.subheader("Squat Metrics")
+        st.metric("Knee Angle", f"{st.session_state.knee_angle}°")
+        st.metric("Back Angle", f"{st.session_state.back_angle}°")
+        st.metric("Depth Status", st.session_state.depth_status)
+
+    elif exercise == "Push-ups":
+        st.subheader("Push-up Metrics")
+        st.metric("Elbow Angle", f"{st.session_state.elbow_angle}°")
+        st.metric("Body Alignment", st.session_state.body_alignment)
+        st.metric("Hip Position", st.session_state.hip_status)
+
+    elif exercise == "Biceps Curls (Dumbbell)":
+        st.subheader("Curl Metrics")
+        st.metric("Elbow Angle", f"{st.session_state.elbow_angle}°")
+        st.metric("Shoulder Stability", st.session_state.shoulder_status)
+        st.metric("Swing Detection", st.session_state.swing_status)
+
+    elif exercise == "Shoulder Press":
+        st.subheader("Shoulder Press Metrics")
+        st.metric("Elbow Angle", f"{st.session_state.elbow_angle}°")
+        st.metric("Arm Extension", st.session_state.extension_status)
+        st.metric("Back Arch", st.session_state.back_arch_status)
+
+    elif exercise == "Lunges":
+        st.subheader("Lunge Metrics")
+        st.metric("Front Knee Angle", f"{st.session_state.front_knee_angle}°")
+        st.metric("Torso Angle", f"{st.session_state.torso_angle}°")
+        st.metric("Balance Status", st.session_state.balance_status)
+
+
+@st.fragment(run_every=1)
+def render_live_coach_feedback():
+    audio_to_play = st.session_state.pop("audio_to_play", None)
+    coach_feedback = st.session_state.get("coach_feedback")
+
+    if audio_to_play:
+        autoplay_audio(audio_to_play)
+
+    if coach_feedback:
+        st.markdown("")
+        st.success(f"🤖 **Coach:** {coach_feedback}")
+
   
 def main():
     st.set_page_config(
@@ -162,16 +228,17 @@ def main():
 
     if "voice_pipeline" not in st.session_state:
         try:
-            api_key = os.environ.get("GROQ_API_KEY", "")
+            api_key = _get_config_value("GROQ_API_KEY", section="groq")
 
-            if not api_key and hasattr(st, "secrets") and "GROQ_API_KEY" in st.secrets:
-                api_key = st.secrets["GROQ_API_KEY"]
+            if not api_key:
+                raise RuntimeError("GROQ_API_KEY is not configured.")
             
             groq_client = Groq(api_key=api_key)
             llm_coach = LLMCoach(groq_client)
             tts = TextToSpeech()
             st.session_state.voice_pipeline = VoicePipeline(llm_coach, tts)
         except Exception as e:
+            st.warning(f"Voice coaching is disabled: {e}")
             st.session_state.voice_pipeline = None
 
     workout_started = st.session_state.get("workout_started", False)
@@ -242,7 +309,9 @@ def main():
 
                 st.rerun()
 
-        if workout_started:
+        render_live_sidebar_metrics()
+
+        if False and workout_started:
             st.divider()
 
             exercise = st.session_state.get("exercise_type")
@@ -292,11 +361,12 @@ def main():
 
     st.title("AI Real-time GYM Coach")
     st.markdown("#### Real-time pose detection with proactive AI voice coaching")
+    render_live_coach_feedback()
  
-    if st.session_state.get("audio_to_play"):
+    if False and st.session_state.get("audio_to_play"):
         autoplay_audio(st.session_state.audio_to_play)
 
-    if st.session_state.get("coach_feedback"):
+    if False and st.session_state.get("coach_feedback"):
         st.markdown("")
         st.success(f"🤖 **Coach:** {st.session_state.coach_feedback}")
 
@@ -342,6 +412,7 @@ def main():
             async_processing=True
         )
 
+        st.session_state.webrtc_context = context
         sync_metrics_update(context)
 
         inject_webrtc_styles()
