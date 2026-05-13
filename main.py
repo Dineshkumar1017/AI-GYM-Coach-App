@@ -1,6 +1,7 @@
 import streamlit as st
 import os
 import time
+from urllib import parse, request
 from dotenv import load_dotenv
 import pandas as pd
 from services.auth.login_wall import render_login_wall
@@ -24,19 +25,24 @@ DEFAULT_ICE_SERVERS = [
     {"urls": ["stun:stun2.l.google.com:19302"]},
     {"urls": ["stun:stun3.l.google.com:19302"]},
     {"urls": ["stun:stun4.l.google.com:19302"]},
+]
+
+
+PUBLIC_TURN_SERVERS = [
     {
-        "urls": [
-            "turn:openrelay.metered.ca:80",
-            "turn:openrelay.metered.ca:443",
-            "turn:openrelay.metered.ca:443?transport=tcp",
-        ],
+        "urls": "turn:openrelay.metered.ca:80",
+        "username": "openrelayproject",
+        "credential": "openrelayproject",
+    },
+    {
+        "urls": "turn:openrelay.metered.ca:443?transport=tcp",
         "username": "openrelayproject",
         "credential": "openrelayproject",
     },
 ]
 
 
-def _get_config_value(name, default=""):
+def _get_config_value(name, default="", section="webrtc"):
     value = os.environ.get(name)
 
     if value:
@@ -46,9 +52,9 @@ def _get_config_value(name, default=""):
         if name in st.secrets:
             return st.secrets[name]
 
-        webrtc_secrets = st.secrets.get("webrtc", {})
-        if name in webrtc_secrets:
-            return webrtc_secrets[name]
+        section_secrets = st.secrets.get(section, {})
+        if name in section_secrets:
+            return section_secrets[name]
     except Exception:
         return default
 
@@ -65,21 +71,69 @@ def _as_list(value):
     return []
 
 
-def get_rtc_configuration():
-    ice_servers = list(DEFAULT_ICE_SERVERS)
+@st.cache_data(ttl=3300, show_spinner=False)
+def _fetch_twilio_ice_servers(account_sid, auth_token, ttl=3600):
+    token_url = f"https://api.twilio.com/2010-04-01/Accounts/{account_sid}/Tokens.json"
+    data = parse.urlencode({"Ttl": ttl}).encode("utf-8")
+    token_request = request.Request(token_url, data=data, method="POST")
+
+    password_manager = request.HTTPPasswordMgrWithDefaultRealm()
+    password_manager.add_password(None, token_url, account_sid, auth_token)
+    opener = request.build_opener(request.HTTPBasicAuthHandler(password_manager))
+
+    with opener.open(token_request, timeout=10) as response:
+        payload = response.read().decode("utf-8")
+
+    import json
+
+    return json.loads(payload).get("ice_servers", [])
+
+
+def _get_twilio_ice_servers():
+    account_sid = _get_config_value("TWILIO_ACCOUNT_SID", section="twilio")
+    auth_token = _get_config_value("TWILIO_AUTH_TOKEN", section="twilio")
+
+    if not account_sid or not auth_token:
+        return []
+
+    try:
+        return _fetch_twilio_ice_servers(account_sid, auth_token)
+    except Exception:
+        return []
+
+
+def _get_static_turn_servers():
     turn_urls = _as_list(_get_config_value("TURN_URLS"))
 
-    if turn_urls:
-        turn_server = {"urls": turn_urls}
+    if not turn_urls:
+        return []
 
-        turn_username = _get_config_value("TURN_USERNAME")
-        turn_credential = _get_config_value("TURN_CREDENTIAL")
+    turn_username = _get_config_value("TURN_USERNAME")
+    turn_credential = _get_config_value("TURN_CREDENTIAL")
+    turn_servers = []
+
+    for turn_url in turn_urls:
+        turn_server = {"urls": turn_url}
 
         if turn_username and turn_credential:
             turn_server["username"] = turn_username
             turn_server["credential"] = turn_credential
 
-        ice_servers.insert(0, turn_server)
+        turn_servers.append(turn_server)
+
+    return turn_servers
+
+
+def get_rtc_configuration():
+    ice_servers = _get_twilio_ice_servers()
+
+    if not ice_servers:
+        ice_servers = _get_static_turn_servers()
+
+    if not ice_servers:
+        ice_servers = PUBLIC_TURN_SERVERS
+
+    ice_servers = [*ice_servers, *DEFAULT_ICE_SERVERS]
 
     return {"iceServers": ice_servers}
 
