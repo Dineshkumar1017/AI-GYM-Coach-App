@@ -28,20 +28,6 @@ DEFAULT_ICE_SERVERS = [
 ]
 
 
-PUBLIC_TURN_SERVERS = [
-    {
-        "urls": "turn:openrelay.metered.ca:80",
-        "username": "openrelayproject",
-        "credential": "openrelayproject",
-    },
-    {
-        "urls": "turn:openrelay.metered.ca:443?transport=tcp",
-        "username": "openrelayproject",
-        "credential": "openrelayproject",
-    },
-]
-
-
 def _get_config_value(name, default="", section="webrtc"):
     value = os.environ.get(name)
 
@@ -69,6 +55,10 @@ def _as_list(value):
         return [item for item in value if item]
 
     return []
+
+
+def _is_openrelay_url(turn_url):
+    return isinstance(turn_url, str) and "openrelay.metered.ca" in turn_url
 
 
 @st.cache_data(ttl=3300, show_spinner=False)
@@ -113,6 +103,9 @@ def _get_static_turn_servers():
     turn_servers = []
 
     for turn_url in turn_urls:
+        if _is_openrelay_url(turn_url):
+            continue
+
         turn_server = {"urls": turn_url}
 
         if turn_username and turn_credential:
@@ -130,12 +123,20 @@ def get_rtc_configuration():
     if not ice_servers:
         ice_servers = _get_static_turn_servers()
 
-    if not ice_servers:
-        ice_servers = PUBLIC_TURN_SERVERS
-
     ice_servers = [*ice_servers, *DEFAULT_ICE_SERVERS]
 
     return {"iceServers": ice_servers}
+
+
+def has_turn_server(rtc_configuration):
+    ice_servers = rtc_configuration.get("iceServers", [])
+
+    for ice_server in ice_servers:
+        urls = _as_list(ice_server.get("urls"))
+        if any(url.startswith("turn:") or url.startswith("turns:") for url in urls):
+            return True
+
+    return False
 
   
 def main():
@@ -321,11 +322,19 @@ def main():
             unsafe_allow_html=True,
         )
     else:
+        rtc_configuration = get_rtc_configuration()
+
+        if not has_turn_server(rtc_configuration):
+            st.warning(
+                "A reliable TURN server is not configured. Add Twilio credentials "
+                "to Streamlit Secrets for stable camera streaming on Streamlit Cloud."
+            )
+
         context = webrtc_streamer(
             key="exercise-analysis",
             mode=WebRtcMode.SENDRECV,
             video_processor_factory=VideoProcessorClass,
-            rtc_configuration=get_rtc_configuration(),
+            rtc_configuration=rtc_configuration,
             media_stream_constraints={
                 "video": True,
                 "audio": False
@@ -334,10 +343,6 @@ def main():
         )
 
         sync_metrics_update(context)
-
-        if context.state.playing:
-            time.sleep(0.25)
-            st.rerun()
 
         inject_webrtc_styles()
 
